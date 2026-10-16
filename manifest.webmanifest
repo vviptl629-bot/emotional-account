@@ -1,0 +1,16 @@
+{
+  "name": "情感账户",
+  "short_name": "情感账户",
+  "description": "记录每一笔想买给她的礼物心意，节日统一兑现。",
+  "lang": "zh-CN",
+  "start_url": "/emotional-account/",
+  "scope": "/emotional-account/",
+  "display": "standalone",
+  "background_color": "#FBF8EF",
+  "theme_color": "#5BB89A",
+  "orientation": "portrait",
+  "icons": [
+    {"src": "icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable"},
+    {"src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable"}
+  ]
+}
