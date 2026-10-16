@@ -312,6 +312,7 @@
         </label>
         <label class="fld"><span class="t">目标节日</span>
           <select id="occSel"></select>
+          <input type="date" id="customDate" style="display:none; margin-top:8px">
         </label>
         <label class="fld"><span class="t">优先级</span>
           <div class="seg" id="prioSeg">
@@ -384,8 +385,8 @@
       </div>
 
       <div class="card">
-        <h2><span id="icSync"></span> 跨设备同步（GitHub Gist）</h2>
-        <p class="muted" style="margin-top:-4px">填入 Gist ID 与 Token 后自动启用：每 45 秒拉取、改动后 800ms 防抖推送。Token 仅存本机，不会写入 Gist。</p>
+        <h2><span id="icSync"></span> 跨设备同步（GitHub Gist · 私密）</h2>
+        <p class="muted" style="margin-top:-4px">填入 Gist ID 与 Token 后自动启用：每 45 秒拉取、改动后 800ms 防抖推送。数据只写在你的<b>私密 Gist</b> 里（不进公开仓库）。Token 仅存本机，不会写入 Gist。</p>
         <label class="fld"><span class="t">Gist ID</span><input type="text" id="gistId" placeholder="你的 gist id"></label>
         <label class="fld"><span class="t">GitHub Token（含 gist 权限）</span><input type="password" id="gistToken" placeholder="ghp_..."></label>
         <div class="btn-row">
@@ -423,6 +424,50 @@
 <div class="mask" id="mask"><div class="modal">
   <h3 id="mTitle">确认</h3><p id="mText">确定吗？</p>
   <div class="btn-row"><button class="btn ghost" id="mCancel">取消</button><button class="btn warn" id="mOk">确定</button></div>
+</div></div>
+
+<!-- 编辑心愿 modal -->
+<div class="mask" id="editMask"><div class="modal wide">
+  <h3>编辑心愿</h3>
+  <label class="fld"><span class="t">想买的东西 *</span>
+    <input type="text" id="editItem" placeholder="比如：她提过想看的香水 / 一条项链…" maxlength="40">
+  </label>
+  <label class="fld"><span class="t">预估价格（¥）*</span>
+    <input type="number" id="editPrice" inputmode="decimal" placeholder="0.00" min="0" step="0.01">
+  </label>
+  <label class="fld"><span class="t">来源</span>
+    <div class="seg" id="editSrcSeg">
+      <button data-src="她说">她提过想要</button>
+      <button data-src="我想">我想买给她</button>
+      <button data-src="共同">共同愿望</button>
+      <button data-src="灵感">灵感</button>
+    </div>
+  </label>
+  <label class="fld"><span class="t">目标节日</span>
+    <select id="editOcc"></select>
+    <input type="date" id="editCustomDate" style="display:none; margin-top:8px">
+  </label>
+  <label class="fld"><span class="t">优先级</span>
+    <div class="seg" id="editPrioSeg">
+      <button data-p="高">高</button>
+      <button data-p="中">中</button>
+      <button data-p="低">低</button>
+    </div>
+  </label>
+  <label class="fld"><span class="t">状态</span>
+    <div class="seg" id="editStatusSeg">
+      <button data-st="pending">在账户</button>
+      <button data-st="gifted">已送</button>
+      <button data-st="cashed">已折现</button>
+    </div>
+  </label>
+  <label class="fld"><span class="t">备注</span>
+    <textarea id="editNote" rows="2" placeholder="在哪看到的、为什么想买、尺码颜色…" maxlength="120"></textarea>
+  </label>
+  <div class="btn-row">
+    <button class="btn ghost" id="editCancel">取消</button>
+    <button class="btn" id="editSave">保存修改</button>
+  </div>
 </div></div>
 
 <!-- 兑现 modal -->
@@ -529,7 +574,7 @@ const Sync = {
   async pullOnce(){
     if(!this.on) return;
     try{
-      const r = await fetch('https://api.github.com/gists/'+S.settings.gistId, {headers:{'X-Requested-With':'wb'}});
+      const r = await fetch('https://api.github.com/gists/'+S.settings.gistId, {headers:{'Authorization':'token '+S.settings.token,'X-Requested-With':'wb'}});
       if(!r.ok) throw new Error('读取失败('+r.status+')');
       const d = await r.json();
       const f = d.files && d.files['emotional-account.json'];
@@ -673,11 +718,11 @@ function wishRow(w){
     <span class="info"><span class="c">${escapeHtml(w.item)}
       <span class="tag ${prioCls}">${w.priority}</span>
       <span class="tag src">${SOURCES[w.source]||w.source}</span>
-      ${occ?'<span class="tag">'+escapeHtml(occ.name)+'</span>':''}
+      ${occ?'<span class="tag">'+escapeHtml(occ.name)+'</span>':(w.targetDate?'<span class="tag">'+escapeHtml(w.targetDate)+'</span>':'')}
       ${w.status!=='pending'?'<span class="tag">'+statusText+'</span>':''}
     </span><span class="n">${escapeHtml(w.note||'')} · ${dateOnly(w.ts).slice(5)}${w.cashedAt?(' · '+dateOnly(w.cashedAt).slice(5)):''}</span></span>
     <span class="amt in">${fmt0(w.price)}</span>
-    <span class="ops"><button data-del="${w.id}" title="删除">${ICON.trash}</button></span>
+    <span class="ops"><button data-edit="${w.id}" title="编辑">${ICON.pen}</button><button data-del="${w.id}" title="删除">${ICON.trash}</button></span>
   </div>`;
 }
 
@@ -685,15 +730,21 @@ function wishRow(w){
 let curSrc='她说', curPrio='中';
 function renderOccSelect(){
   const sel=document.getElementById('occSel');
-  sel.innerHTML = '<option value="">不指定（通用心愿）</option>' + S.settings.occasions.map(o=>`<option value="${o.id}">${escapeHtml(o.name)}（${o.md.replace('-','/')}）</option>`).join('');
+  sel.innerHTML = '<option value="">不指定（通用心愿）</option>'
+    + S.settings.occasions.map(o=>`<option value="${o.id}">${escapeHtml(o.name)}（${o.md.replace('-','/')}）</option>`).join('')
+    + '<option value="__custom__">＋ 自定义日期…</option>';
+  const cd=document.getElementById('customDate'); if(cd) cd.style.display='none';
 }
 function saveWish(){
   const item=document.getElementById('itemInp').value.trim();
   const price=parseFloat(document.getElementById('priceInp').value);
   if(!item){ toast('先写想买的东西'); return; }
   if(!(price>0)){ toast('先填一个大于 0 的价格'); return; }
+  const occVal=document.getElementById('occSel').value;
+  const customDate = occVal==='__custom__' ? document.getElementById('customDate').value : '';
+  if(occVal==='__custom__' && !customDate){ toast('选个自定义日期，或改用节日'); return; }
   const w={ id:uid(), ts:Date.now(), item, price:Math.round(price*100)/100,
-    source:curSrc, occasionId:document.getElementById('occSel').value, priority:curPrio,
+    source:curSrc, occasionId:occVal==='__custom__'?'':occVal, targetDate:customDate, priority:curPrio,
     note:document.getElementById('noteInp').value.trim(), status:'pending', cashedAt:0 };
   S.wishes.push(w);
   safeSave();
@@ -708,12 +759,58 @@ function renderWishList(){
   document.getElementById('wishCount').textContent='共 '+sorted.length+' 笔';
   document.getElementById('wishList').innerHTML = sorted.length? sorted.map(wishRow).join('') : '<div class="muted">还没有记录～</div>';
   document.querySelectorAll('#wishList [data-del]').forEach(b=>b.onclick=()=>confirmDelete(b.dataset.del));
+  document.querySelectorAll('#wishList [data-edit]').forEach(b=>b.onclick=()=>openEdit(b.dataset.edit));
 }
 function confirmDelete(id){
   openModal('删除这条心愿？','删除后无法恢复。',async ()=>{
     S.wishes=S.wishes.filter(w=>w.id!==id); safeSave(); renderDashboard(); renderWishList(); renderList(); toast('已删除');
   });
 }
+
+/* =================== 编辑心愿 =================== */
+let editId=null, editSrc='她说', editPrio='中', editSt='pending';
+function fillEditSeg(segId, attr, val){
+  document.querySelectorAll('#'+segId+' button').forEach(b=>b.classList.toggle('on', b.dataset[attr]===val));
+}
+function openEdit(id){
+  const w=S.wishes.find(x=>x.id===id); if(!w) return;
+  editId=id; editSrc=w.source; editPrio=w.priority; editSt=w.status;
+  document.getElementById('editItem').value=w.item;
+  document.getElementById('editPrice').value=w.price;
+  document.getElementById('editNote').value=w.note||'';
+  document.getElementById('editOcc').innerHTML = '<option value="">不指定（通用心愿）</option>'
+    + S.settings.occasions.map(o=>`<option value="${o.id}">${escapeHtml(o.name)}（${o.md.replace('-','/')}）</option>`).join('')
+    + '<option value="__custom__">＋ 自定义日期…</option>';
+  const hasCustom = !!(w.targetDate && !w.occasionId);
+  document.getElementById('editOcc').value = hasCustom ? '__custom__' : (w.occasionId||'');
+  document.getElementById('editCustomDate').value = hasCustom ? w.targetDate : '';
+  document.getElementById('editCustomDate').style.display = hasCustom ? 'block' : 'none';
+  fillEditSeg('editSrcSeg','src',editSrc);
+  fillEditSeg('editPrioSeg','p',editPrio);
+  fillEditSeg('editStatusSeg','st',editSt);
+  document.getElementById('editMask').classList.add('show');
+}
+function saveEdit(){
+  const w=S.wishes.find(x=>x.id===editId); if(!w) return;
+  const item=document.getElementById('editItem').value.trim();
+  const price=parseFloat(document.getElementById('editPrice').value);
+  if(!item){ toast('先写想买的东西'); return; }
+  if(!(price>0)){ toast('先填一个大于 0 的价格'); return; }
+  w.item=item;
+  w.price=Math.round(price*100)/100;
+  w.source=editSrc;
+  const eocc=document.getElementById('editOcc').value;
+  const ecustom = eocc==='__custom__' ? document.getElementById('editCustomDate').value : '';
+  if(eocc==='__custom__' && !ecustom){ toast('选个自定义日期，或改用节日'); return; }
+  w.occasionId = eocc==='__custom__' ? '' : eocc;
+  w.targetDate = ecustom;
+  w.priority=editPrio;
+  w.note=document.getElementById('editNote').value.trim();
+  const ns=editSt;
+  if(ns!==w.status){ w.status=ns; w.cashedAt=(ns==='pending')?0:Date.now(); }
+  closeEdit(); safeSave(); renderDashboard(); renderWishList(); renderList(); renderRedeem(); toast('已保存修改');
+}
+function closeEdit(){ document.getElementById('editMask').classList.remove('show'); editId=null; }
 
 /* =================== 愿望清单 =================== */
 let curStatus='all';
@@ -723,6 +820,7 @@ function renderList(){
   list.sort((a,b)=>b.ts-a.ts);
   document.getElementById('filterList').innerHTML = list.length? list.map(wishRow).join('') : '<div class="muted">这里还空空如也～</div>';
   document.querySelectorAll('#filterList [data-del]').forEach(b=>b.onclick=()=>confirmDelete(b.dataset.del));
+  document.querySelectorAll('#filterList [data-edit]').forEach(b=>b.onclick=()=>openEdit(b.dataset.edit));
 }
 
 /* =================== 节日兑现 =================== */
@@ -876,6 +974,18 @@ let modalCb=null;
 function openModal(title,text,cb){ document.getElementById('mTitle').textContent=title; document.getElementById('mText').textContent=text; document.getElementById('mask').classList.add('show'); modalCb=cb; }
 function closeModal(){ document.getElementById('mask').classList.remove('show'); modalCb=null; }
 
+/* =================== 编辑弹窗事件 =================== */
+function bindEdit(){
+  document.querySelectorAll('#editSrcSeg button').forEach(b=>b.onclick=()=>{ document.querySelectorAll('#editSrcSeg button').forEach(x=>x.classList.remove('on')); b.classList.add('on'); editSrc=b.dataset.src; });
+  document.querySelectorAll('#editPrioSeg button').forEach(b=>b.onclick=()=>{ document.querySelectorAll('#editPrioSeg button').forEach(x=>x.classList.remove('on')); b.classList.add('on'); editPrio=b.dataset.p; });
+  document.querySelectorAll('#editStatusSeg button').forEach(b=>b.onclick=()=>{ document.querySelectorAll('#editStatusSeg button').forEach(x=>x.classList.remove('on')); b.classList.add('on'); editSt=b.dataset.st; });
+  document.getElementById('editSave').onclick=saveEdit;
+  document.getElementById('editCancel').onclick=closeEdit;
+  document.getElementById('editMask').onclick=(e)=>{ if(e.target.id==='editMask') closeEdit(); };
+  document.getElementById('occSel').onchange=(e)=>{ document.getElementById('customDate').style.display = e.target.value==='__custom__'?'block':'none'; };
+  document.getElementById('editOcc').onchange=(e)=>{ document.getElementById('editCustomDate').style.display = e.target.value==='__custom__'?'block':'none'; };
+}
+
 /* =================== 持久化 =================== */
 function safeSave(){
   Store.save();
@@ -938,6 +1048,8 @@ function bind(){
   document.getElementById('mCancel').onclick=closeModal;
   document.getElementById('mOk').onclick=()=>{ const cb=modalCb; closeModal(); if(cb) cb(); };
   document.getElementById('mask').onclick=(e)=>{ if(e.target.id==='mask') closeModal(); };
+  // 编辑心愿
+  bindEdit();
 }
 
 paintIcons();
