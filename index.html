@@ -1,0 +1,941 @@
+<!DOCTYPE html>
+<!--
+  情感账户 · 单文件工作台
+  逻辑：每记一笔"想买给她的东西"= 存入情感账户一笔心意；余额=待兑现心愿预估总价。
+  平时只存，到节日/纪念日统一打开账户批量兑现（送给她 / 折现）。
+  视觉：奶油薄荷（选定主题），禁用 emoji，内联 SVG 图标。
+  数据层：本地 localStorage 优先 + GitHub Gist 跨设备同步（配置后自动启用，45s 拉取 + 800ms 防抖推送）。
+-->
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>情感账户</title>
+<style>
+  /* ============ 主题：奶油薄荷（选定，默认） ============ */
+  :root{
+    --bg1:#FBF8EF; --bg2:#E7F4EE; --bg3:#F7F4EA;
+    --card:#FFFBF3; --card2:#F6F3E9;
+    --accent:#5BB89A; --accent-deep:#3E9C7E; --accent2:#F2A99E;
+    --gold:#D7B36A; --gold-deep:#BC964E;
+    --ink:#4F5B54; --ink-soft:#9AA39C; --line:#E7E2D2; --line2:#F1ECDF;
+    --warn:#E8857A; --ok:#5BB89A;
+    --shadow:0 8px 22px rgba(120,140,128,.16); --shadow-sm:0 4px 12px rgba(120,140,128,.12);
+    --r:20px;
+  }
+
+  *{box-sizing:border-box; -webkit-tap-highlight-color:transparent;}
+  html,body{margin:0; padding:0;}
+  body{
+    font-family:"PingFang SC","Hiragino Sans GB","Microsoft YaHei",-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+    background:
+      radial-gradient(circle at 12% 8%, var(--bg1) 0, transparent 40%),
+      radial-gradient(circle at 88% 92%, var(--bg2) 0, transparent 44%),
+      var(--bg3);
+    color:var(--ink); font-size:15px; line-height:1.55;
+    min-height:100vh; transition:background .3s;
+  }
+  .app{display:flex; min-height:100vh;}
+
+  /* 侧栏 */
+  .sidebar{
+    width:236px; flex:0 0 236px; padding:22px 16px 22px;
+    background:linear-gradient(180deg,var(--card),var(--card2));
+    border-right:1px dashed var(--line);
+    display:flex; flex-direction:column; gap:6px;
+    position:sticky; top:0; height:100vh;
+  }
+  .brand{display:flex; align-items:center; gap:10px; padding:6px 8px 14px;}
+  .brand .gift{width:46px; height:42px; flex:0 0 46px;}
+  .brand .name{font-size:18px; font-weight:800; letter-spacing:.5px; color:var(--ink);}
+  .brand .sub{font-size:11px; color:var(--ink-soft); margin-top:1px;}
+  .nav-item{
+    display:flex; align-items:center; gap:11px; padding:12px 14px; border-radius:14px;
+    color:var(--ink-soft); cursor:pointer; font-weight:600; font-size:14.5px;
+    transition:.18s; border:1px solid transparent; min-height:46px;
+  }
+  .nav-item svg{width:21px; height:21px; flex:0 0 21px;}
+  .nav-item:hover{background:var(--card2); color:var(--ink);}
+  .nav-item.active{
+    background:linear-gradient(135deg,var(--card),var(--bg2)); color:var(--accent-deep);
+    border-color:var(--line); box-shadow:var(--shadow-sm);
+  }
+  .nav-spacer{flex:1;}
+  .side-foot{font-size:11px; color:var(--ink-soft); padding:8px 12px; line-height:1.5;}
+
+  /* 主区 */
+  .main{flex:1; min-width:0; padding:18px 22px 40px; max-width:1100px; margin:0 auto; width:100%;}
+  .topbar{display:flex; align-items:center; gap:12px; margin-bottom:16px; flex-wrap:wrap;}
+  .topbar h1{font-size:21px; margin:0; font-weight:800; letter-spacing:.5px;}
+  .topbar .date{font-size:12.5px; color:var(--ink-soft); margin-left:auto;}
+  .sync{
+    display:inline-flex; align-items:center; gap:7px; padding:7px 12px; border-radius:999px;
+    font-size:12.5px; font-weight:600; border:1px solid var(--line); background:var(--card);
+  }
+  .sync .dot{width:9px; height:9px; border-radius:50%;}
+  .sync.ok .dot{background:var(--ok);}
+  .sync.err .dot{background:var(--warn);}
+  .sync.busy .dot{background:var(--gold); animation:pulse 1s infinite;}
+  @keyframes pulse{0%,100%{opacity:.4}50%{opacity:1}}
+  .sync button{border:none; background:var(--accent-deep); color:#fff; font-weight:700; border-radius:999px; padding:4px 10px; font-size:12px; cursor:pointer;}
+
+  .view{display:none; animation:fade .25s ease;}
+  .view.active{display:block;}
+  @keyframes fade{from{opacity:0; transform:translateY(6px)}to{opacity:1; transform:none}}
+
+  /* 卡片 */
+  .card{background:var(--card); border:1px solid var(--line2); border-radius:var(--r); padding:18px; box-shadow:var(--shadow-sm); position:relative; margin-bottom:16px;}
+  .card.tilt{transform:rotate(-.5deg);}
+  .card h2{font-size:16px; margin:0 0 12px; display:flex; align-items:center; gap:8px;}
+  .card h2 svg{width:19px; height:19px;}
+  .muted{color:var(--ink-soft); font-size:12.5px;}
+  .grid{display:grid; gap:14px;}
+  .g2{grid-template-columns:1fr 1fr;}
+  .g3{grid-template-columns:repeat(3,1fr);}
+  .g4{grid-template-columns:repeat(4,1fr);}
+  @media(max-width:760px){ .g2,.g3,.g4{grid-template-columns:1fr 1fr;} }
+  @media(max-width:460px){ .g2,.g3,.g4{grid-template-columns:1fr;} }
+
+  .tape{position:absolute; width:64px; height:18px; top:-8px; left:18px;
+    background:repeating-linear-gradient(45deg,var(--accent2),var(--accent2) 7px,var(--bg2) 7px,var(--bg2) 14px);
+    border-radius:3px; opacity:.7; transform:rotate(-3deg); box-shadow:0 2px 5px rgba(0,0,0,.05);}
+
+  /* 统计块 */
+  .stat{background:var(--card2); border-radius:16px; padding:14px; border:1px solid var(--line2);}
+  .stat .lab{font-size:12px; color:var(--ink-soft); display:flex; align-items:center; gap:6px;}
+  .stat .lab svg{width:15px; height:15px;}
+  .stat .val{font-size:23px; font-weight:800; margin-top:4px; letter-spacing:.5px;}
+  .stat .val small{font-size:13px; font-weight:600; color:var(--ink-soft);}
+  .in{color:var(--accent-deep);} .out{color:var(--warn);} .gold{color:var(--gold-deep);} .rose{color:var(--accent-deep);}
+
+  /* 余额大卡 */
+  .balance-card{
+    background:linear-gradient(135deg,var(--accent),var(--accent-deep));
+    color:#fff; border-radius:var(--r); padding:22px 20px; margin-bottom:16px; position:relative; overflow:hidden;
+    box-shadow:var(--shadow);
+  }
+  .balance-card .lab{font-size:13px; opacity:.92; display:flex; align-items:center; gap:7px;}
+  .balance-card .big{font-size:42px; font-weight:800; margin-top:6px; letter-spacing:.5px;}
+  .balance-card .big small{font-size:18px; font-weight:700;}
+  .balance-card .sub{font-size:12.5px; opacity:.9; margin-top:4px;}
+  .balance-card .deco{position:absolute; right:-10px; top:-10px; width:120px; height:120px; opacity:.18;}
+  .balance-card .mini{display:flex; gap:18px; margin-top:14px; flex-wrap:wrap;}
+  .balance-card .mini div{font-size:12.5px; opacity:.95;}
+  .balance-card .mini b{display:block; font-size:17px; font-weight:800;}
+
+  /* 节日倒计时卡 */
+  .next-fest{
+    display:flex; align-items:center; gap:14px; background:var(--card2); border:1px solid var(--line2);
+    border-radius:16px; padding:14px 16px;
+  }
+  .next-fest .ring{width:64px; height:64px; flex:0 0 64px; border-radius:50%; display:grid; place-items:center;
+    background:conic-gradient(var(--accent) calc(var(--p,0)*1%), var(--line2) 0); position:relative;}
+  .next-fest .ring::before{content:''; position:absolute; inset:7px; border-radius:50%; background:var(--card);}
+  .next-fest .ring b{position:relative; font-size:20px; font-weight:800; color:var(--accent-deep);}
+  .next-fest .ring small{position:relative; font-size:9px; color:var(--ink-soft); display:block; text-align:center;}
+  .next-fest .info{flex:1;}
+  .next-fest .info .t{font-size:15px; font-weight:800;}
+  .next-fest .info .d{font-size:12.5px; color:var(--ink-soft); margin-top:2px;}
+
+  /* 列表行 */
+  .tx{display:flex; align-items:center; gap:12px; padding:13px 4px; border-bottom:1px dashed var(--line2);}
+  .tx:last-child{border-bottom:none;}
+  .tx .ic{width:40px; height:40px; border-radius:12px; display:grid; place-items:center; flex:0 0 40px; background:var(--card2);}
+  .tx .ic svg{width:21px; height:21px;}
+  .tx .ic.pending{background:var(--bg2);}
+  .tx .ic.gifted{background:rgba(199,107,126,.12);}
+  .tx .ic.cashed{background:rgba(194,154,78,.14);}
+  .tx .info{flex:1; min-width:0;}
+  .tx .info .c{font-weight:700; font-size:14px; display:flex; align-items:center; gap:7px; flex-wrap:wrap;}
+  .tx .info .n{font-size:12px; color:var(--ink-soft); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; margin-top:2px;}
+  .tx .amt{font-weight:800; font-size:15.5px; white-space:nowrap;}
+  .tx .ops{display:flex; gap:4px;}
+  .tx .ops button{border:none; background:transparent; cursor:pointer; padding:6px; border-radius:8px; min-width:34px; min-height:34px;}
+  .tx .ops button:hover{background:var(--card2);}
+  .tx .ops svg{width:17px; height:17px;}
+
+  .tag{font-size:10.5px; font-weight:700; padding:2px 8px; border-radius:999px; background:var(--bg2); color:var(--ink-soft); border:1px solid var(--line2);}
+  .tag.hi{background:rgba(232,133,122,.14); color:var(--warn); border-color:transparent;}
+  .tag.mid{background:rgba(217,179,108,.16); color:var(--gold-deep); border-color:transparent;}
+  .tag.lo{background:var(--bg2); color:var(--ink-soft); border-color:transparent;}
+  .tag.src{background:var(--bg2); color:var(--accent-deep); border-color:var(--line);}
+
+  /* 表单 */
+  label.fld{display:block; margin-bottom:13px;}
+  label.fld .t{font-size:12.5px; color:var(--ink-soft); font-weight:600; display:block; margin-bottom:5px;}
+  input,select,textarea{width:100%; padding:12px 13px; border:1px solid var(--line); border-radius:13px; font-size:16px; background:var(--card2); color:var(--ink); font-family:inherit;}
+  input:focus,select:focus,textarea:focus{outline:none; border-color:var(--accent-deep); background:#fff;}
+  .seg{display:flex; gap:8px; flex-wrap:wrap;}
+  .seg button{flex:1; min-width:80px; min-height:46px; border:1px solid var(--line); background:var(--card2); border-radius:13px; font-size:14px; font-weight:700; color:var(--ink-soft); cursor:pointer; padding:10px;}
+  .seg button.on{background:var(--accent-deep); color:#fff; border-color:var(--accent-deep);}
+
+  .btn{border:none; border-radius:14px; padding:13px 18px; font-size:15px; font-weight:800; cursor:pointer; min-height:48px; width:100%; color:#fff; background:var(--accent-deep); box-shadow:var(--shadow-sm); transition:.15s;}
+  .btn:active{transform:scale(.98);}
+  .btn.gold{background:var(--gold-deep);}
+  .btn.ghost{background:var(--card2); color:var(--ink); border:1px solid var(--line);}
+  .btn.warn{background:var(--warn);}
+  .btn-row{display:flex; gap:10px;}
+  .btn-row .btn{width:auto; flex:1;}
+
+  /* 节日卡（兑现视图） */
+  .fest{display:flex; align-items:center; gap:12px; padding:14px; border-radius:16px; background:var(--card2); border:1px solid var(--line2); margin-bottom:10px; cursor:pointer; transition:.15s;}
+  .fest:hover{box-shadow:var(--shadow-sm); transform:translateY(-1px);}
+  .fest .ic{width:44px; height:44px; border-radius:12px; display:grid; place-items:center; flex:0 0 44px; background:var(--bg2);}
+  .fest .ic svg{width:23px; height:23px; color:var(--accent-deep);}
+  .fest .info{flex:1;}
+  .fest .info .t{font-size:15px; font-weight:800;}
+  .fest .info .d{font-size:12.5px; color:var(--ink-soft); margin-top:2px;}
+  .fest .days{text-align:right; flex:0 0 auto;}
+  .fest .days b{font-size:20px; font-weight:800; color:var(--accent-deep);}
+  .fest .days small{display:block; font-size:11px; color:var(--ink-soft);}
+
+  .skeleton{color:var(--ink-soft); text-align:center; padding:40px; font-size:14px;}
+
+  /* 底部Tab（手机） */
+  .bottomtab{display:none;}
+  @media(max-width:768px){
+    .sidebar{display:none;}
+    .main{padding:14px 14px 96px;}
+    .bottomtab{display:flex; position:fixed; bottom:0; left:0; right:0; z-index:50;
+      background:rgba(255,253,251,.96); backdrop-filter:blur(8px); border-top:1px solid var(--line);
+      padding:6px 4px calc(6px + env(safe-area-inset-bottom)); justify-content:space-around;}
+    .bt{display:flex; flex-direction:column; align-items:center; gap:2px; padding:6px 4px; min-width:54px; cursor:pointer; color:var(--ink-soft); font-size:10.5px; font-weight:600;}
+    .bt svg{width:23px; height:23px;}
+    .bt.active{color:var(--accent-deep);}
+  }
+
+  .toast{position:fixed; left:50%; bottom:30px; transform:translateX(-50%); background:var(--ink); color:#fff; padding:12px 20px; border-radius:999px; font-size:13.5px; font-weight:600; z-index:99; box-shadow:var(--shadow); opacity:0; pointer-events:none; transition:.25s; max-width:90vw; text-align:center;}
+  .toast.show{opacity:1;}
+
+  .mask{position:fixed; inset:0; background:rgba(91,82,73,.35); display:none; place-items:center; z-index:80; padding:20px;}
+  .mask.show{display:grid;}
+  .modal{background:var(--card); border-radius:20px; padding:22px; max-width:380px; width:100%; box-shadow:var(--shadow); max-height:86vh; overflow:auto;}
+  .modal.wide{max-width:440px;}
+  .modal h3{margin:0 0 8px; font-size:17px;}
+  .modal p{font-size:13.5px; color:var(--ink-soft); margin:0 0 16px;}
+  .err-banner{background:rgba(232,133,122,.1); border:1px solid rgba(232,133,122,.3); border-radius:14px; padding:14px 16px; margin-bottom:16px; display:flex; align-items:center; gap:12px; flex-wrap:wrap;}
+  .err-banner svg{width:22px; height:22px; color:var(--warn);}
+
+  /* 兑现清单 */
+  .pick{display:flex; align-items:flex-start; gap:10px; padding:11px 12px; border-radius:12px; background:var(--card2); border:1px solid var(--line2); margin-bottom:8px; cursor:pointer;}
+  .pick.on{border-color:var(--accent-deep); background:var(--bg2);}
+  .pick .box{width:22px; height:22px; border-radius:7px; border:2px solid var(--line); flex:0 0 22px; margin-top:2px; display:grid; place-items:center; color:#fff;}
+  .pick.on .box{background:var(--accent-deep); border-color:var(--accent-deep);}
+  .pick .txt{flex:1; min-width:0;}
+  .pick .txt b{font-size:14px; font-weight:700; display:block;}
+  .pick .txt small{font-size:12px; color:var(--ink-soft);}
+  .pick .price{font-weight:800; font-size:15px; color:var(--accent-deep);}
+  .pick .grp{font-size:11px; color:var(--ink-soft); font-weight:700; margin:10px 0 4px;}
+</style>
+</head>
+<body>
+<div class="app">
+  <aside class="sidebar">
+    <div class="brand">
+      <span class="gift" id="giftSide"></span>
+      <div>
+        <div class="name">情感账户</div>
+        <div class="sub" id="brandSub">每一笔心意，都是爱</div>
+      </div>
+    </div>
+    <div class="nav-item active" data-view="dashboard"><span id="icHome"></span> 仪表盘</div>
+    <div class="nav-item" data-view="record"><span id="icPen"></span> 记一笔</div>
+    <div class="nav-item" data-view="list"><span id="icList"></span> 愿望清单</div>
+    <div class="nav-item" data-view="redeem"><span id="icGift"></span> 节日兑现</div>
+    <div class="nav-item" data-view="settings"><span id="icGear"></span> 设置</div>
+    <div class="nav-spacer"></div>
+    <div class="side-foot" id="sideFoot">奶油薄荷 · 本地保存<br>填入 Gist 后可跨设备同步</div>
+  </aside>
+
+  <main class="main">
+    <div class="topbar">
+      <h1 id="pageTitle">仪表盘</h1>
+      <span class="sync ok" id="syncBox"><span class="dot"></span><span id="syncText">已保存到本地</span><button id="syncRetry" style="display:none">重试</button></span>
+      <span class="date" id="todayDate"></span>
+    </div>
+    <div id="errZone"></div>
+
+    <!-- 仪表盘 -->
+    <section class="view active" id="view-dashboard">
+      <div class="balance-card">
+        <span class="deco" id="giftDeco"></span>
+        <div class="lab"><span id="icHeart"></span> 情感账户余额</div>
+        <div class="big" id="balanceBig">—</div>
+        <div class="sub" id="balanceSub">还有 0 笔心愿在账户里，等一个节日一起兑现</div>
+        <div class="mini">
+          <div>待兑现<b id="mPending">0</b></div>
+          <div>已送<b id="mGifted">0</b></div>
+          <div>已折现<b id="mCashed">0</b></div>
+        </div>
+      </div>
+
+      <div class="card tilt">
+        <div class="tape"></div>
+        <h2><span id="icCal"></span> 最近的节日</h2>
+        <div id="nextFest"></div>
+      </div>
+
+      <div class="grid g2">
+        <div class="card">
+          <h2><span id="icList"></span> 最近加入的心愿</h2>
+          <div id="recentList"><div class="skeleton">加载中…</div></div>
+        </div>
+        <div class="card">
+          <h2><span id="icChart"></span> 心愿来源构成</h2>
+          <div id="sourceChart"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 记一笔 -->
+    <section class="view" id="view-record">
+      <div class="card">
+        <div class="tape"></div>
+        <h2><span id="icPen"></span> 记一笔想买给她的</h2>
+        <label class="fld"><span class="t">想买的东西 *</span>
+          <input type="text" id="itemInp" placeholder="比如：她提过想看的香水 / 一条项链…" maxlength="40">
+        </label>
+        <label class="fld"><span class="t">预估价格（¥）*</span>
+          <input type="number" id="priceInp" inputmode="decimal" placeholder="0.00" min="0" step="0.01">
+        </label>
+        <label class="fld"><span class="t">来源</span>
+          <div class="seg" id="srcSeg">
+            <button data-src="她说" class="on">她提过想要</button>
+            <button data-src="我想">我想买给她</button>
+            <button data-src="共同">共同愿望</button>
+            <button data-src="灵感">灵感</button>
+          </div>
+        </label>
+        <label class="fld"><span class="t">目标节日</span>
+          <select id="occSel"></select>
+        </label>
+        <label class="fld"><span class="t">优先级</span>
+          <div class="seg" id="prioSeg">
+            <button data-p="高">高</button>
+            <button data-p="中" class="on">中</button>
+            <button data-p="低">低</button>
+          </div>
+        </label>
+        <label class="fld"><span class="t">备注</span>
+          <textarea id="noteInp" rows="2" placeholder="在哪看到的、为什么想买、尺码颜色…" maxlength="120"></textarea>
+        </label>
+        <button class="btn" id="saveBtn">存入情感账户</button>
+      </div>
+
+      <div class="card">
+        <h2><span id="icList"></span> 全部心愿 <span class="muted" id="wishCount"></span></h2>
+        <div id="wishList"><div class="skeleton">加载中…</div></div>
+      </div>
+    </section>
+
+    <!-- 愿望清单 -->
+    <section class="view" id="view-list">
+      <div class="card">
+        <div class="tape"></div>
+        <h2><span id="icList"></span> 愿望清单</h2>
+        <div class="seg" id="statusSeg" style="margin-bottom:12px">
+          <button data-s="all" class="on">全部</button>
+          <button data-s="pending">在账户</button>
+          <button data-s="gifted">已送</button>
+          <button data-s="cashed">已折现</button>
+        </div>
+        <div id="filterList"><div class="skeleton">加载中…</div></div>
+      </div>
+    </section>
+
+    <!-- 节日兑现 -->
+    <section class="view" id="view-redeem">
+      <div class="card">
+        <div class="tape"></div>
+        <h2><span id="icGift"></span> 节日兑现</h2>
+        <p class="muted" style="margin:-4px 0 14px">点开一个节日，勾选想兑现的心愿，统一<span style="color:var(--accent-deep);font-weight:700">送给她</span>或<span style="color:var(--gold-deep);font-weight:700">折现</span>。</p>
+        <div id="festList"></div>
+      </div>
+      <div class="card">
+        <h2><span id="icCheck"></span> 已兑现记录</h2>
+        <div id="redeemHistory"><div class="skeleton">还没有兑现记录</div></div>
+      </div>
+    </section>
+
+    <!-- 设置 -->
+    <section class="view" id="view-settings">
+      <div class="card">
+        <div class="tape"></div>
+        <h2><span id="icHeart"></span> 基本设置</h2>
+        <label class="fld"><span class="t">对她的称呼</span>
+          <input type="text" id="herName" placeholder="她 / 真名 / 昵称" maxlength="12">
+        </label>
+      </div>
+
+      <div class="card">
+        <h2><span id="icCal"></span> 节日管理</h2>
+        <p class="muted" style="margin-top:-4px">日期为 MM-DD，每年自动循环。提醒：七夕为农历，请填对应公历日期。</p>
+        <div id="occManage" style="margin:12px 0"></div>
+        <div class="grid g2" style="align-items:end">
+          <label class="fld" style="margin:0"><span class="t">节日名称</span><input type="text" id="occName" placeholder="比如：生日" maxlength="10"></label>
+          <label class="fld" style="margin:0"><span class="t">日期 MM-DD</span><input type="text" id="occDate" placeholder="08-15" maxlength="5"></label>
+        </div>
+        <div style="height:10px"></div>
+        <button class="btn ghost" id="addOcc">添加节日</button>
+      </div>
+
+      <div class="card">
+        <h2><span id="icSync"></span> 跨设备同步（GitHub Gist）</h2>
+        <p class="muted" style="margin-top:-4px">填入 Gist ID 与 Token 后自动启用：每 45 秒拉取、改动后 800ms 防抖推送。Token 仅存本机，不会写入 Gist。</p>
+        <label class="fld"><span class="t">Gist ID</span><input type="text" id="gistId" placeholder="你的 gist id"></label>
+        <label class="fld"><span class="t">GitHub Token（含 gist 权限）</span><input type="password" id="gistToken" placeholder="ghp_..."></label>
+        <div class="btn-row">
+          <button class="btn ghost" id="saveSync">保存并启用同步</button>
+          <button class="btn ghost" id="testSync">测试连接</button>
+        </div>
+        <div id="syncMsg" class="muted" style="margin-top:8px"></div>
+      </div>
+
+      <div class="card">
+        <h2><span id="icShield"></span> 数据安全</h2>
+        <div class="btn-row">
+          <button class="btn ghost" id="exportBtn">导出 JSON 备份</button>
+          <button class="btn ghost" id="importBtn">导入恢复</button>
+        </div>
+        <div style="height:10px"></div>
+        <button class="btn warn" id="clearBtn">清空全部数据</button>
+        <input type="file" id="importFile" accept="application/json" style="display:none">
+      </div>
+    </section>
+  </main>
+</div>
+
+<nav class="bottomtab">
+  <div class="bt active" data-view="dashboard"><span id="icHome2"></span>仪表盘</div>
+  <div class="bt" data-view="record"><span id="icPen2"></span>记一笔</div>
+  <div class="bt" data-view="list"><span id="icList2"></span>清单</div>
+  <div class="bt" data-view="redeem"><span id="icGift2"></span>兑现</div>
+  <div class="bt" data-view="settings"><span id="icGear2"></span>设置</div>
+</nav>
+
+<div class="toast" id="toast"></div>
+
+<!-- 确认 modal -->
+<div class="mask" id="mask"><div class="modal">
+  <h3 id="mTitle">确认</h3><p id="mText">确定吗？</p>
+  <div class="btn-row"><button class="btn ghost" id="mCancel">取消</button><button class="btn warn" id="mOk">确定</button></div>
+</div></div>
+
+<!-- 兑现 modal -->
+<div class="mask" id="redeemMask"><div class="modal wide">
+  <h3 id="rTitle">节日兑现</h3>
+  <p id="rText" class="muted">勾选要兑现的心愿</p>
+  <div id="rBody"></div>
+  <div style="height:12px"></div>
+  <div class="btn-row">
+    <button class="btn" id="rGift">送给她</button>
+    <button class="btn gold" id="rCash">折现</button>
+  </div>
+  <div style="height:8px"></div>
+  <button class="btn ghost" id="rCancel">取消</button>
+</div></div>
+
+<script>
+/* =================== 图标（内联SVG，禁用emoji） =================== */
+const ICON = {
+  home:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 11.5 12 4l9 7.5"/><path d="M5 10v9h14v-9"/><path d="M10 19v-5h4v5"/></svg>',
+  pen:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20l4-1 9.5-9.5a2 2 0 0 0-3-3L5 16z"/><path d="M13.5 6.5l3 3"/></svg>',
+  list:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M8 6h12M8 12h12M8 18h12"/><circle cx="4" cy="6" r="1.3" fill="currentColor"/><circle cx="4" cy="12" r="1.3" fill="currentColor"/><circle cx="4" cy="18" r="1.3" fill="currentColor"/></svg>',
+  gift:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="9" width="18" height="12" rx="2"/><path d="M3 13h18M12 9v12"/><path d="M12 9C9 9 7 7 9 5.5 10.5 4.5 12 7 12 9zM12 9c3 0 5-2 3-3.5C13.5 4.5 12 7 12 9z"/></svg>',
+  gear:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M4.2 4.2l2.1 2.1M17.7 17.7l2.1 2.1M2 12h3M19 12h3M4.2 19.8l2.1-2.1M17.7 6.3l2.1-2.1"/></svg>',
+  cal:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="17" rx="2"/><path d="M3 9h18M8 2v4M16 2v4"/></svg>',
+  heart:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20s-7-4.5-9.5-9C1 8 2.5 4.5 6 4.5c2 0 3.2 1.2 4 2.3.8-1.1 2-2.3 4-2.3 3.5 0 5 3.5 3.5 6.5C19 15.5 12 20 12 20z"/></svg>',
+  coin:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M9.5 9h3.2a2 2 0 0 1 0 4H10m0 0h3.5" stroke-linecap="round"/></svg>',
+  chart:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19V5M4 19h16"/><path d="M7 15l4-5 3 3 4-6"/></svg>',
+  check:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12l5 5 9-11"/></svg>',
+  plus:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>',
+  trash:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13"/></svg>',
+  edit:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20l4-1 9.5-9.5a2 2 0 0 0-3-3L5 16z"/></svg>',
+  warn:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3 2 20h20z"/><path d="M12 9v5M12 17h0"/></svg>',
+  shield:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M12 3l7 3v6c0 4.5-3 7.5-7 9-4-1.5-7-4.5-7-9V6z"/></svg>',
+  sync:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 11a8 8 0 1 0-2 6"/><path d="M20 5v6h-6"/></svg>',
+  sparkle:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z"/></svg>',
+  theme:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 0 0 0 18z" fill="currentColor" stroke="none"/></svg>'
+};
+
+/* 礼物插画（随主题变色） */
+const GIFT = (cls)=>`<svg class="${cls}" viewBox="0 0 120 104" xmlns="http://www.w3.org/2000/svg">
+  <ellipse cx="60" cy="94" rx="34" ry="5" fill="rgba(0,0,0,.07)"/>
+  <rect x="28" y="50" width="64" height="42" rx="6" fill="var(--accent2)" stroke="var(--accent-deep)" stroke-width="2"/>
+  <rect x="28" y="42" width="64" height="14" rx="4" fill="var(--accent)" stroke="var(--accent-deep)" stroke-width="2"/>
+  <rect x="54" y="42" width="12" height="50" fill="var(--accent-deep)" opacity=".8"/>
+  <path d="M60 42 C44 24 28 32 38 42 C46 49 54 42 60 42Z" fill="var(--accent)" stroke="var(--accent-deep)" stroke-width="2"/>
+  <path d="M60 42 C76 24 92 32 82 42 C74 49 66 42 60 42Z" fill="var(--accent)" stroke="var(--accent-deep)" stroke-width="2"/>
+  <path d="M44 64c4 4 10 4 14 0M62 64c4 4 10 4 14 0" stroke="var(--accent-deep)" stroke-width="2" fill="none" stroke-linecap="round" opacity=".7"/>
+</svg>`;
+
+/* =================== 默认设置 & 节日 =================== */
+const DEFAULT_SETTINGS = {
+  herName:'她', theme:'mint',
+  gistId:'494792ac7ceca24e0630eb23f6ce27d7', token:'', syncOn:false,
+  occasions:[
+    {id:'o_birth', name:'生日',   md:'06-18'},
+    {id:'o_anni',  name:'纪念日', md:'09-09'},
+    {id:'o_val',  name:'情人节', md:'02-14'},
+    {id:'o_qixi', name:'七夕',   md:'08-19'},
+    {id:'o_women',name:'妇女节', md:'03-08'},
+    {id:'o_xmas', name:'圣诞节', md:'12-25'}
+  ]
+};
+const SOURCES = {她说:'她说', 我想:'我想', 共同:'共同', 灵感:'灵感'};
+
+let S = { settings:null, wishes:[], error:null, ready:false, syncedAt:0 };
+
+/* =================== 数据层（本地优先 + Gist 同步） =================== */
+const KEY='wb_emotional_v1';
+const Store = {
+  async load(){
+    const raw = localStorage.getItem(KEY);
+    if(raw===null){ const seed=seedData(); localStorage.setItem(KEY, JSON.stringify(seed)); return seed; }
+    try{ return JSON.parse(raw); }catch(e){ const seed=seedData(); localStorage.setItem(KEY, JSON.stringify(seed)); return seed; }
+  },
+  save(){ localStorage.setItem(KEY, JSON.stringify({settings:S.settings, wishes:S.wishes, syncedAt:S.syncedAt})); }
+};
+/* Gist 同步：45s 拉取 + 800ms 防抖推送 */
+const Sync = {
+  timer:null, debounce:null,
+  get on(){ return S.settings && S.settings.syncOn && S.settings.gistId && S.settings.token; },
+  async push(){
+    if(!this.on) return 'local';
+    clearTimeout(this.debounce);
+    this.debounce = setTimeout(async ()=>{
+      setSync('busy','同步中…');
+      try{
+        const content = JSON.stringify({settings:S.settings, wishes:S.wishes, syncedAt:Date.now()});
+        const r = await fetch('https://api.github.com/gists/'+S.settings.gistId, {
+          method:'PATCH',
+          headers:{'Authorization':'token '+S.settings.token,'Content-Type':'application/json','X-Requested-With':'wb'},
+          body: JSON.stringify({files:{'emotional-account.json':{content}}})
+        });
+        if(!r.ok) throw new Error('写入失败('+r.status+')');
+        S.syncedAt = Date.now();
+        setSync('ok','已同步到云端');
+      }catch(e){ setSync('err','同步失败：'+e.message); }
+    }, 800);
+    return 'local';
+  },
+  async pullOnce(){
+    if(!this.on) return;
+    try{
+      const r = await fetch('https://api.github.com/gists/'+S.settings.gistId, {headers:{'X-Requested-With':'wb'}});
+      if(!r.ok) throw new Error('读取失败('+r.status+')');
+      const d = await r.json();
+      const f = d.files && d.files['emotional-account.json'];
+      if(!f || !f.content) return;
+      const data = JSON.parse(f.content);
+      if(data.syncedAt && data.syncedAt > (S.syncedAt||0)){
+        S.settings = data.settings; S.wishes = data.wishes||[]; S.syncedAt = data.syncedAt;
+        Store.save(); renderAll(); setSync('ok','已从云端更新');
+      }
+    }catch(e){ setSync('err','拉取失败：'+e.message); }
+  },
+  start(){
+    if(this.timer) clearInterval(this.timer);
+    if(!this.on) return;
+    this.timer = setInterval(()=>this.pullOnce(), 45000);
+  }
+};
+
+function seedData(){
+  const s = clone(DEFAULT_SETTINGS);
+  const d = (n)=>{ const x=new Date(); x.setHours(12,0,0,0); x.setDate(x.getDate()-n); return x.getTime(); };
+  const wishes = [
+    {id:uid(), ts:d(6), item:'她提过想看的香水', price:680, source:'她说', occasionId:'o_birth', priority:'中', note:'某专柜看到的，说香味很温柔', status:'pending', cashedAt:0},
+    {id:uid(), ts:d(3), item:'一条细金项链', price:1280, source:'我想', occasionId:'o_anni', priority:'高', note:'纪念日送，低调百搭', status:'pending', cashedAt:0},
+    {id:uid(), ts:d(1), item:'护手霜礼盒', price:220, source:'灵感', occasionId:'', priority:'低', note:'路过觉得包装好看', status:'pending', cashedAt:0}
+  ];
+  return { settings:s, wishes, syncedAt:0 };
+}
+function uid(){ return 'w'+Date.now().toString(36)+Math.random().toString(36).slice(2,7); }
+
+/* =================== 工具 =================== */
+const clone=(o)=>JSON.parse(JSON.stringify(o));
+const fmt=(n)=> '¥'+ (Math.round(n*100)/100).toLocaleString('zh-CN',{minimumFractionDigits:0,maximumFractionDigits:2});
+const fmt0=(n)=> '¥'+ Math.round(n).toLocaleString('zh-CN');
+const dateOnly=(ts)=>{ const d=new Date(ts); const p=(x)=>String(x).padStart(2,'0'); return d.getFullYear()+'-'+p(d.getMonth()+1)+'-'+p(d.getDate()); };
+const escapeHtml=(s)=> (s||'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+function toast(msg){ const t=document.getElementById('toast'); t.textContent=msg; t.classList.add('show'); clearTimeout(t._t); t._t=setTimeout(()=>t.classList.remove('show'),1900); }
+function weekday(){ const w=['周日','周一','周二','周三','周四','周五','周六']; return w[new Date().getDay()]; }
+
+/* 节日下一次日期 & 倒计时 */
+function nextOccasionDate(md){
+  const [m,day]=md.split('-').map(Number);
+  const now=new Date(); now.setHours(0,0,0,0);
+  let y=now.getFullYear();
+  let cand=new Date(y,m-1,day);
+  if(cand < now){ cand=new Date(y+1,m-1,day); }
+  return cand;
+}
+function daysUntil(md){
+  const cand=nextOccasionDate(md);
+  const now=new Date(); now.setHours(0,0,0,0);
+  return Math.round((cand-now)/86400000);
+}
+
+/* =================== 同步状态 =================== */
+function setSync(state, text){
+  const box=document.getElementById('syncBox');
+  box.className='sync '+state;
+  document.getElementById('syncText').textContent=text;
+  document.getElementById('syncRetry').style.display=(state==='err')?'inline-block':'none';
+}
+
+/* =================== 图标 =================== */
+function paintIcons(){
+  const map={icHome:'home',icPen:'pen',icList:'list',icGift:'gift',icGear:'gear',icCal:'cal',icHeart:'heart',
+    icCoin:'coin',icChart:'chart',icCheck:'check',icShield:'shield',icSync:'sync',icSparkle:'sparkle',icTheme:'theme'};
+  for(const id in map){ const el=document.getElementById(id); if(el) el.innerHTML=ICON[map[id]]; }
+  document.getElementById('icHome2').innerHTML=ICON.home;
+  document.getElementById('icPen2').innerHTML=ICON.pen;
+  document.getElementById('icList2').innerHTML=ICON.list;
+  document.getElementById('icGift2').innerHTML=ICON.gift;
+  document.getElementById('icGear2').innerHTML=ICON.gear;
+  document.getElementById('giftSide').innerHTML=GIFT('');
+  document.getElementById('giftDeco').innerHTML=GIFT('');
+}
+
+/* =================== 视图切换 =================== */
+const TITLES={dashboard:'仪表盘',record:'记一笔',list:'愿望清单',redeem:'节日兑现',settings:'设置'};
+function switchView(v){
+  document.querySelectorAll('.nav-item').forEach(n=>n.classList.toggle('active',n.dataset.view===v));
+  document.querySelectorAll('.bt').forEach(n=>n.classList.toggle('active',n.dataset.view===v));
+  document.querySelectorAll('.view').forEach(s=>s.classList.toggle('active',s.id==='view-'+v));
+  document.getElementById('pageTitle').textContent=TITLES[v];
+  if(v==='record'){ renderOccSelect(); }
+  if(v==='list') renderList();
+  if(v==='redeem') renderRedeem();
+  if(v==='settings') fillSettings();
+  window.scrollTo(0,0);
+}
+
+/* =================== 仪表盘 =================== */
+function renderDashboard(){
+  const her=S.settings.herName;
+  document.getElementById('brandSub').textContent='每一笔心意，都是爱';
+  const pend=S.wishes.filter(w=>w.status==='pending');
+  const gifted=S.wishes.filter(w=>w.status==='gifted');
+  const cashed=S.wishes.filter(w=>w.status==='cashed');
+  const bal=pend.reduce((a,w)=>a+w.price,0);
+  document.getElementById('balanceBig').innerHTML=fmt0(bal)+' <small>待兑现</small>';
+  document.getElementById('balanceSub').textContent='还有 '+pend.length+' 笔心愿在账户里，等一个节日一起兑现给'+her;
+  document.getElementById('mPending').textContent=fmt0(pend.reduce((a,w)=>a+w.price,0));
+  document.getElementById('mGifted').textContent=fmt0(gifted.reduce((a,w)=>a+w.price,0));
+  document.getElementById('mCashed').textContent=fmt0(cashed.reduce((a,w)=>a+w.price,0));
+
+  // 最近的节日（按倒计时升序）
+  const occs=[...S.settings.occasions].map(o=>({...o, days:daysUntil(o.md)})).sort((a,b)=>a.days-b.days);
+  const nf=occs[0];
+  const pct = Math.min(100, Math.max(0, Math.round((365-nf.days)/365*100)));
+  document.getElementById('nextFest').innerHTML = nf? `
+    <div class="next-fest">
+      <div class="ring" style="--p:${pct}"><b>${nf.days}</b><small>天后</small></div>
+      <div class="info"><div class="t">${escapeHtml(nf.name)}</div><div class="d">${nf.md.replace('-','月')}日 · 还有 ${nf.days} 天</div></div>
+      <div class="days"><button class="btn" style="width:auto;padding:9px 16px" data-open="${nf.id}">打开账户</button></div>
+    </div>
+    ${occs.slice(1,3).map(o=>`<div style="display:flex;justify-content:space-between;font-size:12.5px;color:var(--ink-soft);margin-top:10px"><span>${escapeHtml(o.name)}</span><span>${o.days} 天后</span></div>`).join('')}
+  ` : '<div class="muted">去设置添加节日</div>';
+  document.querySelectorAll('#nextFest [data-open]').forEach(b=>b.onclick=()=>openRedeem(b.dataset.open));
+
+  // 最近加入
+  const recent=[...S.wishes].sort((a,b)=>b.ts-a.ts).slice(0,5);
+  document.getElementById('recentList').innerHTML = recent.length? recent.map(wishRow).join('') : '<div class="muted">还没有记录，去记一笔吧～</div>';
+
+  // 来源构成
+  const srcKeys=Object.keys(SOURCES);
+  const counts=srcKeys.map(k=>({k, n:pend.filter(w=>w.source===k).length, v:pend.filter(w=>w.source===k).reduce((a,w)=>a+w.price,0)}));
+  const totalV=bal||1;
+  document.getElementById('sourceChart').innerHTML = `
+    <div style="font-size:12.5px;color:var(--ink-soft);margin-bottom:8px">待兑现 ${fmt0(bal)}，按来源</div>
+    ${counts.map(c=>`<div style="margin-bottom:10px"><div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:4px"><span>${SOURCES[c.k]}</span><span style="color:var(--ink-soft)">${c.n}笔 · ${fmt0(c.v)}</span></div><div style="height:10px;border-radius:999px;background:var(--line2);overflow:hidden"><div style="height:100%;width:${Math.round(c.v/totalV*100)}%;background:var(--accent)"></div></div></div>`).join('')}`;
+}
+
+/* =================== 心愿行 =================== */
+function wishRow(w){
+  const cls = w.status==='pending'?'pending':(w.status==='gifted'?'gifted':'cashed');
+  const icon = w.status==='pending'?ICON.gift:(w.status==='gifted'?ICON.heart:ICON.coin);
+  const occ = S.settings.occasions.find(o=>o.id===w.occasionId);
+  const prioCls = w.priority==='高'?'hi':(w.priority==='中'?'mid':'lo');
+  const statusText = w.status==='pending'?'在账户':(w.status==='gifted'?'已送':'已折现');
+  return `<div class="tx">
+    <span class="ic ${cls}">${icon}</span>
+    <span class="info"><span class="c">${escapeHtml(w.item)}
+      <span class="tag ${prioCls}">${w.priority}</span>
+      <span class="tag src">${SOURCES[w.source]||w.source}</span>
+      ${occ?'<span class="tag">'+escapeHtml(occ.name)+'</span>':''}
+      ${w.status!=='pending'?'<span class="tag">'+statusText+'</span>':''}
+    </span><span class="n">${escapeHtml(w.note||'')} · ${dateOnly(w.ts).slice(5)}${w.cashedAt?(' · '+dateOnly(w.cashedAt).slice(5)):''}</span></span>
+    <span class="amt in">${fmt0(w.price)}</span>
+    <span class="ops"><button data-del="${w.id}" title="删除">${ICON.trash}</button></span>
+  </div>`;
+}
+
+/* =================== 记一笔 =================== */
+let curSrc='她说', curPrio='中';
+function renderOccSelect(){
+  const sel=document.getElementById('occSel');
+  sel.innerHTML = '<option value="">不指定（通用心愿）</option>' + S.settings.occasions.map(o=>`<option value="${o.id}">${escapeHtml(o.name)}（${o.md.replace('-','/')}）</option>`).join('');
+}
+function saveWish(){
+  const item=document.getElementById('itemInp').value.trim();
+  const price=parseFloat(document.getElementById('priceInp').value);
+  if(!item){ toast('先写想买的东西'); return; }
+  if(!(price>0)){ toast('先填一个大于 0 的价格'); return; }
+  const w={ id:uid(), ts:Date.now(), item, price:Math.round(price*100)/100,
+    source:curSrc, occasionId:document.getElementById('occSel').value, priority:curPrio,
+    note:document.getElementById('noteInp').value.trim(), status:'pending', cashedAt:0 };
+  S.wishes.push(w);
+  safeSave();
+  toast('已存入情感账户');
+  document.getElementById('itemInp').value='';
+  document.getElementById('priceInp').value='';
+  document.getElementById('noteInp').value='';
+  renderDashboard(); renderWishList();
+}
+function renderWishList(){
+  const sorted=[...S.wishes].sort((a,b)=>b.ts-a.ts);
+  document.getElementById('wishCount').textContent='共 '+sorted.length+' 笔';
+  document.getElementById('wishList').innerHTML = sorted.length? sorted.map(wishRow).join('') : '<div class="muted">还没有记录～</div>';
+  document.querySelectorAll('#wishList [data-del]').forEach(b=>b.onclick=()=>confirmDelete(b.dataset.del));
+}
+function confirmDelete(id){
+  openModal('删除这条心愿？','删除后无法恢复。',async ()=>{
+    S.wishes=S.wishes.filter(w=>w.id!==id); safeSave(); renderDashboard(); renderWishList(); renderList(); toast('已删除');
+  });
+}
+
+/* =================== 愿望清单 =================== */
+let curStatus='all';
+function renderList(){
+  let list=[...S.wishes];
+  if(curStatus!=='all') list=list.filter(w=>w.status===curStatus);
+  list.sort((a,b)=>b.ts-a.ts);
+  document.getElementById('filterList').innerHTML = list.length? list.map(wishRow).join('') : '<div class="muted">这里还空空如也～</div>';
+  document.querySelectorAll('#filterList [data-del]').forEach(b=>b.onclick=()=>confirmDelete(b.dataset.del));
+}
+
+/* =================== 节日兑现 =================== */
+function renderRedeem(){
+  const occs=[...S.settings.occasions].map(o=>({...o, days:daysUntil(o.md)})).sort((a,b)=>a.days-b.days);
+  document.getElementById('festList').innerHTML = occs.map(o=>`
+    <div class="fest" data-open="${o.id}">
+      <div class="ic">${ICON.cal}</div>
+      <div class="info"><div class="t">${escapeHtml(o.name)}</div><div class="d">${o.md.replace('-','月')}日</div></div>
+      <div class="days"><b>${o.days}</b><small>天后</small></div>
+    </div>`).join('');
+  document.querySelectorAll('#festList [data-open]').forEach(el=>el.onclick=()=>openRedeem(el.dataset.open));
+
+  // 已兑现记录
+  const done=S.wishes.filter(w=>w.status!=='pending' && w.cashedAt);
+  if(!done.length){ document.getElementById('redeemHistory').innerHTML='<div class="skeleton">还没有兑现记录</div>'; return; }
+  done.sort((a,b)=>b.cashedAt-a.cashedAt);
+  document.getElementById('redeemHistory').innerHTML = done.map(w=>{
+    const occ=S.settings.occasions.find(o=>o.id===w.redeemedOccasion);
+    const mode=w.status==='gifted'?'送给她':'折现';
+    return `<div class="tx">
+      <span class="ic ${w.status==='gifted'?'gifted':'cashed'}">${w.status==='gifted'?ICON.heart:ICON.coin}</span>
+      <span class="info"><span class="c">${escapeHtml(w.item)} <span class="tag ${w.status==='gifted'?'hi':'mid'}">${mode}</span></span>
+      <span class="n">${occ?escapeHtml(occ.name):'平日'} · ${dateOnly(w.cashedAt)}</span></span>
+      <span class="amt ${w.status==='gifted'?'rose':'gold'}">${fmt0(w.price)}</span>
+    </div>`;
+  }).join('');
+}
+
+let redeemState={occId:null, picked:new Set()};
+function openRedeem(occId){
+  const occ=S.settings.occasions.find(o=>o.id===occId);
+  const pend=S.wishes.filter(w=>w.status==='pending');
+  const own=pend.filter(w=>w.occasionId===occId);
+  const common=pend.filter(w=>w.occasionId!==occId);
+  redeemState={occId, picked:new Set()};
+  document.getElementById('rTitle').textContent='兑现 · '+(occ?occ.name:'平日');
+  document.getElementById('rText').textContent='勾选要兑现给'+S.settings.herName+'的心愿，然后选择方式';
+  let html='';
+  if(own.length){
+    html+='<div class="grp">本节日专属（'+own.length+'）</div>';
+    html+=own.map(pickRow).join('');
+  }
+  if(common.length){
+    html+='<div class="grp">通用心愿（'+common.length+'）· 也可一起兑现</div>';
+    html+=common.map(pickRow).join('');
+  }
+  if(!pend.length) html='<div class="muted">账户里没有待兑现的心愿了～</div>';
+  document.getElementById('rBody').innerHTML=html;
+  document.querySelectorAll('#rBody .pick').forEach(el=>el.onclick=()=>{
+    const id=el.dataset.id;
+    if(redeemState.picked.has(id)){ redeemState.picked.delete(id); el.classList.remove('on'); }
+    else { redeemState.picked.add(id); el.classList.add('on'); }
+  });
+  document.getElementById('redeemMask').classList.add('show');
+}
+function pickRow(w){
+  return `<div class="pick" data-id="${w.id}">
+    <div class="box">${ICON.check}</div>
+    <div class="txt"><b>${escapeHtml(w.item)}</b><small>${SOURCES[w.source]||w.source} · ${w.priority}优先${w.note?' · '+escapeHtml(w.note):''}</small></div>
+    <div class="price">${fmt0(w.price)}</div>
+  </div>`;
+}
+function doRedeem(mode){
+  if(!redeemState.picked.size){ toast('先勾选要兑现的心愿'); return; }
+  const ids=[...redeemState.picked];
+  S.wishes.forEach(w=>{ if(ids.includes(w.id)){ w.status=mode==='gift'?'gifted':'cashed'; w.cashedAt=Date.now(); w.redeemedOccasion=redeemState.occId; } });
+  document.getElementById('redeemMask').classList.remove('show');
+  safeSave();
+  toast(mode==='gift'?('已送给'+S.settings.herName+' '+ids.length+' 份心意'):('已折现 '+ids.length+' 份心意'));
+  renderDashboard(); renderRedeem(); renderList();
+}
+
+/* =================== 设置 =================== */
+function fillSettings(){
+  document.getElementById('herName').value=S.settings.herName;
+  document.getElementById('gistId').value=S.settings.gistId||'';
+  document.getElementById('gistToken').value=S.settings.token||'';
+  renderOccManage();
+}
+function renderOccManage(){
+  document.getElementById('occManage').innerHTML = S.settings.occasions.map(o=>`
+    <div style="display:flex;align-items:center;gap:10px;padding:9px 12px;border-radius:12px;background:var(--card2);border:1px solid var(--line2);margin-bottom:8px">
+      <span style="flex:1;font-weight:700;font-size:14px">${escapeHtml(o.name)}</span>
+      <span class="tag">${o.md}</span>
+      <button class="btn warn" style="width:auto;min-height:36px;padding:6px 12px;font-size:12px" data-delocc="${o.id}">删除</button>
+    </div>`).join('');
+  document.querySelectorAll('#occManage [data-delocc]').forEach(b=>b.onclick=()=>{
+    S.settings.occasions=S.settings.occasions.filter(o=>o.id!==b.dataset.delocc); safeSave(); renderOccManage(); renderDashboard(); renderRedeem(); toast('已删除节日');
+  });
+}
+function addOccasion(){
+  const name=document.getElementById('occName').value.trim();
+  const md=document.getElementById('occDate').value.trim();
+  if(!name||!/^\d{1,2}-\d{1,2}$/.test(md)){ toast('填节日名和 MM-DD'); return; }
+  S.settings.occasions.push({id:'o_'+uid(), name, md});
+  document.getElementById('occName').value=''; document.getElementById('occDate').value='';
+  safeSave(); renderOccManage(); renderDashboard(); renderRedeem(); toast('已添加 '+name);
+}
+function saveSync(){
+  S.settings.gistId=document.getElementById('gistId').value.trim();
+  S.settings.token=document.getElementById('gistToken').value.trim();
+  S.settings.syncOn = !!(S.settings.gistId && S.settings.token);
+  safeSave(); Sync.start();
+  document.getElementById('syncMsg').textContent = S.settings.syncOn? '已保存，同步已启用（每45秒拉取）' : '已保存，但未填齐 ID/Token，暂未启用同步';
+  if(S.settings.syncOn) Sync.push();
+  toast(S.settings.syncOn?'同步已启用':'同步未启用');
+}
+async function testSync(){
+  if(!S.settings.gistId || !S.settings.token){ toast('先填 Gist ID 和 Token'); return; }
+  setSync('busy','测试中…');
+  try{
+    const r=await fetch('https://api.github.com/gists/'+S.settings.gistId,{headers:{'Authorization':'token '+S.settings.token,'X-Requested-With':'wb'}});
+    if(!r.ok) throw new Error('状态 '+r.status);
+    document.getElementById('syncMsg').textContent='连接成功 ✓ 该 Gist 可读';
+    setSync('ok','连接成功');
+  }catch(e){ document.getElementById('syncMsg').textContent='连接失败：'+e.message; setSync('err','连接失败'); }
+}
+
+/* =================== 主题 =================== */
+function applyTheme(th){ /* 仅奶油薄荷主题，无需切换 */ }
+
+/* =================== 数据导入导出 =================== */
+function exportJSON(){
+  const data={settings:S.settings, wishes:S.wishes, exportedAt:Date.now()};
+  const blob=new Blob([JSON.stringify(data,null,2)],{type:'application/json'});
+  const a=document.createElement('a'); a.href=URL.createObjectURL(blob);
+  a.download='情感账户_备份_'+dateOnly(Date.now())+'.json'; a.click();
+  toast('已导出 JSON 备份');
+}
+function importJSON(file){
+  const rd=new FileReader();
+  rd.onload=()=>{ try{
+    const d=JSON.parse(rd.result);
+    if(!d.settings||!Array.isArray(d.wishes)) throw new Error('格式不对');
+    S.settings=Object.assign(clone(DEFAULT_SETTINGS),d.settings);
+    S.wishes=d.wishes; S.syncedAt=d.syncedAt||0;
+    safeSave(); applyTheme(S.settings.theme); renderAll(); toast('已从备份恢复 '+d.wishes.length+' 笔');
+  }catch(e){ toast('导入失败：'+e.message); } };
+  rd.readAsText(file);
+}
+function clearAll(){
+  openModal('清空全部数据？','将删除所有心愿与设置并恢复示例值，此操作不可恢复。',()=>{
+    localStorage.removeItem(KEY); const seed=seedData(); S.settings=seed.settings; S.wishes=seed.wishes; S.syncedAt=0;
+    applyTheme(S.settings.theme); safeSave(); renderAll(); toast('已重置为示例数据');
+  });
+}
+
+/* =================== modal =================== */
+let modalCb=null;
+function openModal(title,text,cb){ document.getElementById('mTitle').textContent=title; document.getElementById('mText').textContent=text; document.getElementById('mask').classList.add('show'); modalCb=cb; }
+function closeModal(){ document.getElementById('mask').classList.remove('show'); modalCb=null; }
+
+/* =================== 持久化 =================== */
+function safeSave(){
+  Store.save();
+  setSync(Sync.on?'busy':'ok', Sync.on?'待同步':'已保存到本地');
+  if(Sync.on) Sync.push();
+}
+
+/* =================== 启动 =================== */
+async function boot(){
+  setSync('busy','加载中…');
+  document.getElementById('errZone').innerHTML='';
+  try{
+    const d=await Store.load();
+    S.settings=d.settings; S.wishes=d.wishes||[]; S.syncedAt=d.syncedAt||0; S.ready=true;
+    applyTheme(S.settings.theme);
+    setSync(Sync.on?'busy':'ok', Sync.on?'待同步':'已保存到本地');
+    if(Sync.on) Sync.start();
+  }catch(e){
+    S.error=e.message; S.settings=clone(DEFAULT_SETTINGS); S.wishes=[];
+    setSync('err','读取失败：'+e.message);
+    document.getElementById('errZone').innerHTML=`<div class="err-banner"><span>${ICON.warn}</span><div style="flex:1">数据读取失败：${escapeHtml(e.message)}<br>已用默认设置渲染，点重试重新加载。</div><button class="btn" style="width:auto;padding:10px 18px" onclick="boot()">重试</button></div>`;
+  }
+  renderAll();
+}
+function renderAll(){
+  paintIcons();
+  document.getElementById('todayDate').textContent=dateOnly(Date.now())+' · '+weekday();
+  if(S.ready || S.error){
+    renderDashboard(); renderWishList();
+    if(document.getElementById('view-list').classList.contains('active')) renderList();
+    if(document.getElementById('view-redeem').classList.contains('active')) renderRedeem();
+    if(document.getElementById('view-settings').classList.contains('active')) fillSettings();
+  }
+}
+
+/* =================== 事件绑定 =================== */
+function bind(){
+  document.querySelectorAll('.nav-item,.bt').forEach(n=>n.onclick=()=>switchView(n.dataset.view));
+  document.getElementById('syncRetry').onclick=()=>boot();
+  // 记一笔
+  document.querySelectorAll('#srcSeg button').forEach(b=>b.onclick=()=>{ document.querySelectorAll('#srcSeg button').forEach(x=>x.classList.remove('on')); b.classList.add('on'); curSrc=b.dataset.src; });
+  document.querySelectorAll('#prioSeg button').forEach(b=>b.onclick=()=>{ document.querySelectorAll('#prioSeg button').forEach(x=>x.classList.remove('on')); b.classList.add('on'); curPrio=b.dataset.p; });
+  document.getElementById('saveBtn').onclick=saveWish;
+  // 清单筛选
+  document.querySelectorAll('#statusSeg button').forEach(b=>b.onclick=()=>{ document.querySelectorAll('#statusSeg button').forEach(x=>x.classList.remove('on')); b.classList.add('on'); curStatus=b.dataset.s; renderList(); });
+  // 兑现
+  document.getElementById('rGift').onclick=()=>doRedeem('gift');
+  document.getElementById('rCash').onclick=()=>doRedeem('cash');
+  document.getElementById('rCancel').onclick=()=>document.getElementById('redeemMask').classList.remove('show');
+  // 设置
+  document.getElementById('herName').onchange=()=>{ S.settings.herName=document.getElementById('herName').value.trim()||'她'; safeSave(); renderDashboard(); document.getElementById('brandSub').textContent='每一笔心意，都是爱'; toast('称呼已更新'); };
+  document.getElementById('addOcc').onclick=addOccasion;
+  document.getElementById('saveSync').onclick=saveSync;
+  document.getElementById('testSync').onclick=testSync;
+  document.getElementById('exportBtn').onclick=exportJSON;
+  document.getElementById('importBtn').onclick=()=>document.getElementById('importFile').click();
+  document.getElementById('importFile').onchange=(e)=>{ if(e.target.files[0]) importJSON(e.target.files[0]); };
+  document.getElementById('clearBtn').onclick=clearAll;
+  // modal
+  document.getElementById('mCancel').onclick=closeModal;
+  document.getElementById('mOk').onclick=()=>{ closeModal(); if(modalCb) modalCb(); };
+  document.getElementById('mask').onclick=(e)=>{ if(e.target.id==='mask') closeModal(); };
+}
+
+paintIcons();
+bind();
+boot();
+</script>
+</body>
+</html>
