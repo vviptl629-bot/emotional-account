@@ -472,6 +472,9 @@ const GIFT = (cls)=>`<svg class="${cls}" viewBox="0 0 120 104" xmlns="http://www
   <path d="M60 42 C76 24 92 32 82 42 C74 49 66 42 60 42Z" fill="var(--accent)" stroke="var(--accent-deep)" stroke-width="2"/>
   <path d="M44 64c4 4 10 4 14 0M62 64c4 4 10 4 14 0" stroke="var(--accent-deep)" stroke-width="2" fill="none" stroke-linecap="round" opacity=".7"/>
 </svg>`;
+const TEN = (cls)=>`<svg class="${cls}" viewBox="0 0 120 104" xmlns="http://www.w3.org/2000/svg">
+  <text x="60" y="80" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'PingFang SC','Microsoft YaHei',sans-serif" font-size="80" font-weight="800" fill="var(--accent-deep)" text-anchor="middle">10</text>
+</svg>`;
 
 /* =================== 默认设置 & 节日 =================== */
 const DEFAULT_SETTINGS = {
@@ -599,8 +602,8 @@ function paintIcons(){
   document.getElementById('icList2').innerHTML=ICON.list;
   document.getElementById('icGift2').innerHTML=ICON.gift;
   document.getElementById('icGear2').innerHTML=ICON.gear;
-  document.getElementById('giftSide').innerHTML=GIFT('');
-  document.getElementById('giftDeco').innerHTML=GIFT('');
+  document.getElementById('giftSide').innerHTML=TEN('');
+  document.getElementById('giftDeco').innerHTML=TEN('');
 }
 
 /* =================== 视图切换 =================== */
@@ -933,7 +936,7 @@ function bind(){
   document.getElementById('clearBtn').onclick=clearAll;
   // modal
   document.getElementById('mCancel').onclick=closeModal;
-  document.getElementById('mOk').onclick=()=>{ closeModal(); if(modalCb) modalCb(); };
+  document.getElementById('mOk').onclick=()=>{ const cb=modalCb; closeModal(); if(cb) cb(); };
   document.getElementById('mask').onclick=(e)=>{ if(e.target.id==='mask') closeModal(); };
 }
 
