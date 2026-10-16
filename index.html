@@ -405,6 +405,7 @@
         <div style="height:10px"></div>
         <button class="btn warn" id="clearBtn">清空全部数据</button>
         <input type="file" id="importFile" accept="application/json" style="display:none">
+        <div class="muted" style="margin-top:12px; font-size:12px; text-align:center">版本 build-4 · 2026-10-16</div>
       </div>
     </section>
   </main>
@@ -789,6 +790,7 @@ function openEdit(id){
   fillEditSeg('editPrioSeg','p',editPrio);
   fillEditSeg('editStatusSeg','st',editSt);
   document.getElementById('editMask').classList.add('show');
+  maskOpenedAt=Date.now();
 }
 function saveEdit(){
   const w=S.wishes.find(x=>x.id===editId); if(!w) return;
@@ -970,8 +972,8 @@ function clearAll(){
 }
 
 /* =================== modal =================== */
-let modalCb=null;
-function openModal(title,text,cb){ document.getElementById('mTitle').textContent=title; document.getElementById('mText').textContent=text; document.getElementById('mask').classList.add('show'); modalCb=cb; }
+let modalCb=null, maskOpenedAt=0;
+function openModal(title,text,cb){ document.getElementById('mTitle').textContent=title; document.getElementById('mText').textContent=text; document.getElementById('mask').classList.add('show'); maskOpenedAt=Date.now(); modalCb=cb; }
 function closeModal(){ document.getElementById('mask').classList.remove('show'); modalCb=null; }
 
 /* =================== 编辑弹窗事件 =================== */
@@ -981,7 +983,7 @@ function bindEdit(){
   document.querySelectorAll('#editStatusSeg button').forEach(b=>b.onclick=()=>{ document.querySelectorAll('#editStatusSeg button').forEach(x=>x.classList.remove('on')); b.classList.add('on'); editSt=b.dataset.st; });
   document.getElementById('editSave').onclick=saveEdit;
   document.getElementById('editCancel').onclick=closeEdit;
-  document.getElementById('editMask').onclick=(e)=>{ if(e.target.id==='editMask') closeEdit(); };
+  document.getElementById('editMask').onclick=(e)=>{ if(e.target.id==='editMask' && Date.now()-maskOpenedAt>350) closeEdit(); };
   document.getElementById('occSel').onchange=(e)=>{ document.getElementById('customDate').style.display = e.target.value==='__custom__'?'block':'none'; };
   document.getElementById('editOcc').onchange=(e)=>{ document.getElementById('editCustomDate').style.display = e.target.value==='__custom__'?'block':'none'; };
 }
@@ -1047,7 +1049,7 @@ function bind(){
   // modal
   document.getElementById('mCancel').onclick=closeModal;
   document.getElementById('mOk').onclick=()=>{ const cb=modalCb; closeModal(); if(cb) cb(); };
-  document.getElementById('mask').onclick=(e)=>{ if(e.target.id==='mask') closeModal(); };
+  document.getElementById('mask').onclick=(e)=>{ if(e.target.id==='mask' && Date.now()-maskOpenedAt>350) closeModal(); };
   // 编辑心愿
   bindEdit();
 }
@@ -1058,7 +1060,16 @@ boot();
 </script>
 <script>
   if('serviceWorker' in navigator && location.protocol.indexOf('http')===0){
-    window.addEventListener('load',function(){ navigator.serviceWorker.register('sw.js').catch(function(){}); });
+    window.addEventListener('load',function(){
+      navigator.serviceWorker.register('sw.js').then(function(reg){
+        try{ reg.update(); }catch(e){}
+      }).catch(function(){});
+      // 新版本 Service Worker 接管后自动刷新一次，确保更新立刻生效
+      var reloaded=false;
+      navigator.serviceWorker.addEventListener('controllerchange',function(){
+        if(reloaded) return; reloaded=true; location.reload();
+      });
+    });
   }
 </script>
 </body>
