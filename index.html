@@ -11,6 +11,10 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>情感账户</title>
+  <meta name="theme-color" content="#5BB89A">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icon-192.png">
+  <link rel="apple-touch-icon" href="icon-192.png">
 <style>
   /* ============ 主题：奶油薄荷（选定，默认） ============ */
   :root{
@@ -936,6 +940,11 @@ function bind(){
 paintIcons();
 bind();
 boot();
+</script>
+<script>
+  if('serviceWorker' in navigator && location.protocol.indexOf('http')===0){
+    window.addEventListener('load',function(){ navigator.serviceWorker.register('sw.js').catch(function(){}); });
+  }
 </script>
 </body>
 </html>
