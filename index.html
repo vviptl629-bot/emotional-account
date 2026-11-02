@@ -566,10 +566,10 @@ const Sync = {
           body: JSON.stringify({files:{'emotional-account.json':{content}}})
         });
         if(!r.ok) throw new Error('写入失败('+r.status+')');
-        S.syncedAt = Date.now();
+        S.syncedAt = Date.now(); Sync._lp=Date.now();
         setSync('ok','已同步到云端');
       }catch(e){ setSync('err','同步失败：'+e.message); }
-    }, 800);
+    }, Math.max(800,(Sync._lp||0)+60000-Date.now()));
     return 'local';
   },
   async pullOnce(){
