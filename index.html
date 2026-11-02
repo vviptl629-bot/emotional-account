@@ -386,7 +386,7 @@
 
       <div class="card">
         <h2><span id="icSync"></span> 跨设备同步（GitHub Gist · 私密）</h2>
-        <p class="muted" style="margin-top:-4px">填入 Gist ID 与 Token 后自动启用：每 45 秒拉取、改动后 800ms 防抖推送。数据只写在你的<b>私密 Gist</b> 里（不进公开仓库）。Token 仅存本机，不会写入 Gist。</p>
+        <p class="muted" style="margin-top:-4px">填入 Gist ID 与 Token 后自动启用：数据以本机为准，约每小时备份一次；切到后台或关闭页面时立即补一次。数据只写在你的<b>私密 Gist</b> 里（不进公开仓库）。Token 仅存本机，不会写入 Gist。</p>
         <label class="fld"><span class="t">Gist ID</span><input type="text" id="gistId" placeholder="你的 gist id"></label>
         <label class="fld"><span class="t">GitHub Token（含 gist 权限）</span><input type="password" id="gistToken" placeholder="ghp_..."></label>
         <div class="btn-row">
@@ -549,11 +549,11 @@ const Store = {
   },
   save(){ localStorage.setItem(KEY, JSON.stringify({settings:S.settings, wishes:S.wishes, syncedAt:S.syncedAt})); }
 };
-/* Gist 同步：45s 拉取 + 800ms 防抖推送 */
+/* Gist 备份：本机为准，约每小时推送一次快照；切后台/关页面立即补推 */
 const Sync = {
   timer:null, debounce:null,
   get on(){ return S.settings && S.settings.syncOn && S.settings.gistId && S.settings.token; },
-  async push(){
+  async push(immediate){
     if(!this.on) return 'local';
     clearTimeout(this.debounce);
     this.debounce = setTimeout(async ()=>{
@@ -569,7 +569,7 @@ const Sync = {
         S.syncedAt = Date.now(); Sync._lp=Date.now();
         setSync('ok','已同步到云端');
       }catch(e){ setSync('err','同步失败：'+e.message); }
-    }, Math.max(800,(Sync._lp||0)+60000-Date.now()));
+    }, immediate?0:Math.max(3000,(Sync._lp||0)+3600000-Date.now()));
     return 'local';
   },
   async pullOnce(){
@@ -590,9 +590,13 @@ const Sync = {
   start(){
     if(this.timer) clearInterval(this.timer);
     if(!this.on) return;
-    this.timer = setInterval(()=>this.pullOnce(), 300000);
-  }
+    this.timer = setInterval(()=>this.pullOnce(), 3600000);
+  },
+  /* 有待推送的定时任务时，切后台/关页面就立刻执行，不再等满 1 小时 */
+  flush(){ if(this.on && this.debounce){ clearTimeout(this.debounce); this.debounce=null; this.push(true); } }
 };
+document.addEventListener('visibilitychange',function(){ if(document.hidden) Sync.flush(); });
+window.addEventListener('pagehide',function(){ Sync.flush(); });
 
 function seedData(){
   const s = clone(DEFAULT_SETTINGS);
@@ -927,7 +931,7 @@ function saveSync(){
   S.settings.token=document.getElementById('gistToken').value.trim();
   S.settings.syncOn = !!(S.settings.gistId && S.settings.token);
   safeSave(); Sync.start();
-  document.getElementById('syncMsg').textContent = S.settings.syncOn? '已保存，同步已启用（每45秒拉取）' : '已保存，但未填齐 ID/Token，暂未启用同步';
+  document.getElementById('syncMsg').textContent = S.settings.syncOn? '已保存，备份已启用（约每小时一次）' : '已保存，但未填齐 ID/Token，暂未启用同步';
   if(S.settings.syncOn) Sync.push();
   toast(S.settings.syncOn?'同步已启用':'同步未启用');
 }
