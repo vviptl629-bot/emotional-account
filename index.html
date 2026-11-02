@@ -590,7 +590,7 @@ const Sync = {
   start(){
     if(this.timer) clearInterval(this.timer);
     if(!this.on) return;
-    this.timer = setInterval(()=>this.pullOnce(), 45000);
+    this.timer = setInterval(()=>this.pullOnce(), 300000);
   }
 };
 
